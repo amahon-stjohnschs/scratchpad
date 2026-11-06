@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Scratchpad</title>
+<style>
+  :root { --ink:#1a1a1a; --line:#c9ced6; --accent:#0b5fff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:#fff; color:var(--ink);
+    font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  #app { max-width:900px; margin:0 auto; padding:8px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+  .grp { display:flex; gap:4px; }
+  .wrap { flex-wrap:wrap; }
+  button, select { min-height:44px; min-width:44px; padding:0 12px; border:1px solid var(--line);
+    background:#fff; border-radius:8px; font:inherit; color:inherit; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline:3px solid var(--accent); outline-offset:1px; }
+  button[aria-pressed="true"] { background:#e8f0ff; border-color:var(--accent); }
+  button:disabled { opacity:.4; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.key { font-size:18px; padding:0 10px; }
+  .sw { display:inline-block; width:22px; height:22px; border-radius:50%; vertical-align:middle; border:1px solid #0003; }
+  .wd { display:inline-block; background:#222; border-radius:50%; vertical-align:middle; }
+  label.chk { display:flex; align-items:center; gap:6px; min-height:44px; }
+  label.chk input { width:22px; height:22px; }
+  #c { display:block; width:100%; max-width:900px; height:auto; aspect-ratio:3/2;
+    border:1px solid var(--line); background:#fff; touch-action:none; cursor:crosshair; }
+  #mathPanel { margin-top:8px; padding:8px; border:1px solid var(--accent); border-radius:8px; background:#f5f8ff; }
+  #mIn { flex:1; min-width:180px; min-height:44px; font-size:18px; padding:0 10px; border:1px solid var(--line); border-radius:8px;
+    -webkit-user-select:text; user-select:text; }
+  #saveRow, #viewRow, #buildRow { margin-top:8px; }
+  textarea, input[type=text], input[type=number] { -webkit-user-select:text; user-select:text; }
+  textarea { width:100%; height:84px; font:12px/1.3 ui-monospace,Menlo,monospace; padding:6px; border:1px solid var(--line); border-radius:8px; }
+  #status { min-height:22px; margin:6px 0; font-size:14px; }
+  .hint { font-size:13px; color:#555; margin:6px 0; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:8px 0; }
+  .row label { display:flex; gap:6px; align-items:center; }
+  .row input[type=text], .row input[type=number], .row select { min-height:40px; padding:0 8px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  #bPrev { width:100%; border:1px solid var(--line); border-radius:8px; margin-top:10px; height:820px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="bar" id="bar" role="toolbar" aria-label="Drawing tools">
+    <div class="grp" id="tools" role="group" aria-label="Tool"></div>
+    <div class="grp" id="colors" role="group" aria-label="Colour"></div>
+    <div class="grp" id="widths" role="group" aria-label="Line thickness"></div>
+    <select id="bg" aria-label="Background"></select>
+    <div class="grp">
+      <button id="undo" type="button">Undo</button>
+      <button id="redo" type="button">Redo</button>
+      <button id="clear" type="button">Clear</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="finger"> Draw with finger</label>
+    <label class="chk" id="snapLbl" hidden><input type="checkbox" id="snap" checked> Snap lines to grid</label>
+  </div>
+
+  <canvas id="c" aria-label="Drawing area"></canvas>
+
+  <!-- Equation entry -->
+  <div id="mathPanel" hidden>
+    <div class="bar">
+      <input id="mIn" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Type your equation">
+      <div class="grp" id="mSizes" role="group" aria-label="Text size"></div>
+      <button id="mOk" type="button" class="primary">Place</button>
+      <button id="mCancel" type="button">Cancel</button>
+    </div>
+    <div class="grp wrap" id="keys"></div>
+    <p class="hint">Type it like this: <b>x^2</b> for x&sup2; &middot; <b>3/4</b> or <b>(x+1)/(x-2)</b> for a fraction &middot;
+      <b>sqrt(x)</b> for &radic;x &middot; <b>pi</b> for &pi; &middot; <b>&lt;=</b> for &le; &middot; <b>&gt;=</b> for &ge;.
+      Use a space to end a fraction: <b>1/2 x</b>. To fix something you placed, choose Math and tap it.</p>
+  </div>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <!-- Student: create a code to paste into the essay box -->
+  <div id="saveRow">
+    <button id="save" type="button" class="primary">Create save code</button>
+    <button id="copy" type="button" hidden>Copy code</button>
+    <textarea id="box" readonly hidden aria-label="Save code" spellcheck="false"></textarea>
+    <p class="hint" id="stuHint">Draw with Apple Pencil or a mouse (turn on "Draw with finger" to use a finger).
+      When you are done, press <b>Create save code</b>, copy the text, and paste it into the answer box.</p>
+  </div>
+
+  <!-- Teacher: paste a student's code to see the drawing -->
+  <div id="viewRow" hidden>
+    <label for="inBox"><b>Paste a student's save code</b></label>
+    <textarea id="inBox" spellcheck="false" aria-label="Student save code"></textarea>
+    <button id="load" type="button" class="primary">Show drawing</button>
+  </div>
+
+  <!-- Teacher: build the embed code for a question -->
+  <div id="buildRow" hidden>
+    <h2 style="margin:4px 0">Question builder (teachers)</h2>
+    <p class="hint">Choose how the whiteboard should look for one question. Copy the result into the question's HTML editor.
+      Students cannot change any of these choices, and they have no way to add an image.</p>
+    <div class="row"><label>Where this page is hosted <input type="text" id="bBase" size="48"></label>
+      <label><input type="checkbox" id="bHash"> Put the settings after # instead of ? (try this if the host ignores them, e.g. Canvas Files)</label></div>
+    <div class="row">
+      <label>Question ID <input type="text" id="bId" value="q1" size="8"></label>
+      <label>Page shape <select id="bLayout"><option value="landscape">Landscape (3:2)</option><option value="portrait">Portrait (3:4, for full pages)</option></select></label>
+      <label>Height of box (px) <input type="number" id="bHeight" value="800" min="400" max="2400" step="50"></label>
+    </div>
+    <div class="row">
+      <label>Background <select id="bBg"></select></label>
+      <label id="bImgLbl" hidden>Image file name or address <input type="text" id="bImg" size="30" placeholder="page1.png"></label>
+      <label><input type="checkbox" id="bLock" checked> Students cannot change the background</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="bLink"> Students paste a one-click link instead of a code (opens the drawing straight from SpeedGrader)</label>
+    </div>
+    <div class="row">
+      <b>Tools:</b>
+      <label><input type="checkbox" class="bTool" value="pen" checked> Pen</label>
+      <label><input type="checkbox" class="bTool" value="line" checked> Line</label>
+      <label><input type="checkbox" class="bTool" value="math" checked> Math</label>
+      <label><input type="checkbox" class="bTool" value="eraser" checked> Eraser</label>
+      <label>Math keypad <select id="bKeys"><option value="algebra">Algebra 1</option><option value="geometry">Geometry</option><option value="both">Both</option></select></label>
+    </div>
+    <label for="bOut"><b>1. Paste this into the question</b></label>
+    <textarea id="bOut" readonly spellcheck="false"></textarea>
+    <button id="bCopy" type="button">Copy embed code</button>
+    <label for="bView" style="display:block;margin-top:10px"><b>2. Your grading link for this question (open it, then paste a student's code)</b></label>
+    <textarea id="bView" readonly spellcheck="false" style="height:56px"></textarea>
+    <button id="bCopyView" type="button">Copy grading link</button>
+    <p class="hint" id="bMsg"></p>
+    <iframe id="bPrev" title="Preview"></iframe>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ---------- Settings ----------
+const W = 900;
+let H = 600;                                      // 600 = landscape, 1200 = portrait (saved in the code)
+const COLORS = ['#111111', '#0b5fff', '#d92d20', '#1a8a3c'];
+const COLOR_NAMES = ['Black', 'Blue', 'Red', 'Green'];
+const WIDTHS = [2, 4, 8];
+const WIDTH_NAMES = ['Thin', 'Medium', 'Thick'];
+const SIZES = [28, 40, 56];                       // equation text sizes
+const SIZE_NAMES = ['Small', 'Medium', 'Large'];
+const PRESETS = { blank: 'Blank', grid: 'Graph paper', axes: 'Coordinate plane', lined: 'Lined paper' };
+const SAVE_URL = '';                              // Optional later: server endpoint. Receives {code} as JSON, replies {id}.
+const IMAGE_HOSTS = [];                           // Extra https hosts allowed for teacher background images, e.g. ['files.yourschool.org']
+
+const params = new URLSearchParams(location.search);
+// Settings may also come after a # (for example  whiteboard.html#id=q1&bg=grid ). Some hosts, such as Canvas Files,
+// can drop the ? part of an address; a # part is kept by the browser.
+new URLSearchParams(location.hash.replace(/^#/, '')).forEach((v, k) => { if (!params.has(k)) params.set(k, v); });
+const MODE = params.get('mode') || '';
+const VIEW = MODE === 'view', BUILD = MODE === 'build';
+// Optional "one-click link" mode: instead of a code, students get a link that opens the teacher viewer with their drawing showing.
+const VIEWBASE = (params.get('view') || '').split('#')[0];
+const LINK = /^(https?|file):/i.test(VIEWBASE);
+function teacherLink(code) {
+  const v = new URLSearchParams({ mode: 'view' }); const b = params.get('bg'); if (b) v.set('bg', b); v.set('code', code);
+  return VIEWBASE + '#' + v.toString();
+}
+const $ = id => document.getElementById(id);
+if (params.get('layout') === 'portrait') H = 1200;
+
+// CODEC-START
+const B64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const UB64 = t => { t = t.replace(/-/g, '+').replace(/_/g, '/'); while (t.length % 4) t += '=';
+  const b = atob(t), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+async function gz(u8, compress) {
+  const S = compress ? CompressionStream : DecompressionStream;
+  const st = new Blob([u8]).stream().pipeThrough(new S('gzip'));
+  return new Uint8Array(await new Response(st).arrayBuffer());
+}
+// Ink strokes are stored as delta-encoded integers (compresses very well); equations as plain text.
+// Note: the code never contains an image or an image address, so students cannot smuggle one in.
+function pack(bg, items, q) {
+  const s = [], m = [];
+  for (const k of items) {
+    if (k.s !== undefined) { m.push([k.c, Math.round(k.x), Math.round(k.y), k.z, k.s]); continue; }
+    const d = []; let px = 0, py = 0;
+    for (let i = 0; i < k.p.length; i += 2) { d.push(k.p[i] - px, k.p[i + 1] - py); px = k.p[i]; py = k.p[i + 1]; }
+    s.push([k.c, k.w, d]);
+  }
+  return JSON.stringify({ v: 1, w: W, h: H, b: bg, q: q || '', s, m });
+}
+function unpack(j) {
+  const o = JSON.parse(j);
+  if (!o || o.v !== 1 || !Array.isArray(o.s)) throw new Error('Unrecognised code');
+  let total = 0;
+  const items = o.s.map(k => {
+    if (!Array.isArray(k) || k.length !== 3 || !Array.isArray(k[2]) || k[2].length < 2 || k[2].length % 2) throw new Error('Bad stroke');
+    const c = k[0] | 0, w = k[1] | 0;
+    if (c < 0 || c >= COLORS.length || w < 0 || w >= WIDTHS.length) throw new Error('Bad stroke style');
+    total += k[2].length; if (total > 400000) throw new Error('Code too large');
+    let x = 0, y = 0; const p = new Array(k[2].length);
+    for (let i = 0; i < p.length; i += 2) { x += +k[2][i]; y += +k[2][i + 1]; p[i] = x; p[i + 1] = y; }
+    if (!p.every(Number.isFinite)) throw new Error('Bad numbers');
+    return { c, w, p };
+  });
+  const ms = Array.isArray(o.m) ? o.m : [];
+  if (ms.length > 2000) throw new Error('Too many equations');
+  for (const k of ms) {
+    if (!Array.isArray(k) || k.length !== 5 || typeof k[4] !== 'string') throw new Error('Bad equation');
+    const c = k[0] | 0, z = k[3] | 0, x = +k[1], y = +k[2];
+    if (c < 0 || c >= COLORS.length || z < 0 || z >= SIZES.length || !Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Bad equation');
+    items.push({ c, x, y, z, s: k[4].slice(0, 200) });
+  }
+  return { bg: String(o.b || 'blank').slice(0, 40), q: String(o.q || '').slice(0, 60), h: o.h === 1200 ? 1200 : 600, items };
+}
+async function encode(bg, items, q) {
+  const raw = new TextEncoder().encode(pack(bg, items, q));
+  if (typeof CompressionStream === 'function') return 'WB1.' + B64(await gz(raw, true));
+  return 'WB0.' + B64(raw);                      // older browsers: uncompressed but still valid
+}
+async function decode(text) {
+  // Tolerates line breaks, <p> tags and &nbsp; that a rich-text answer box may add.
+  const t = String(text).replace(/<[^>]*>/g, '').replace(/&[a-z#0-9]+;/gi, '').replace(/\s+/g, '');
+  const m = t.match(/WB([01])\.([A-Za-z0-9_-]+)/);
+  if (!m) throw new Error('No save code found');
+  const bytes = UB64(m[2]);
+  const raw = m[1] === '1' ? await gz(bytes, false) : bytes;
+  return unpack(new TextDecoder().decode(raw));
+}
+// CODEC-END
+
+// MATH-START
+// A small typesetter: turns simple typed maths such as  (x+1)/(x-2)  or  3x^2 + sqrt(y)  into drawn maths.
+// Everything is laid out at a size of 100 units and scaled when drawn.
+const MFONT = '"STIX Two Math","Cambria Math","Times New Roman",Times,serif';
+const SYMS = new Map(Object.entries({ pi: 'π', theta: 'θ', deg: '°', angle: '∠', triangle: '△', perp: '⊥', parallel: '∥',
+  approx: '≈', inf: '∞', cong: '≅', sim: '∼' }));
+const FUNCS = new Set(['sin', 'cos', 'tan', 'log', 'ln']);
+const BIN = new Set(['+', '−', '×', '÷', '=', '≠', '<', '>', '≤', '≥', '±', '≈', '→', '∼', '≅', '∥', '⊥', '·']);
+const UNARY = new Set(['+', '−', '±']);
+const TWOCH = new Map(Object.entries({ '<=': '≤', '>=': '≥', '!=': '≠', '+-': '±', '->': '→' }));
+const ONECH = new Map(Object.entries({ '-': '−', '*': '×', "'": '′' }));
+
+function mtok(s) {
+  s = String(s).slice(0, 200); const t = []; let i = 0, m;
+  while (i < s.length) {
+    const ch = s[i], rest = s.slice(i);
+    if (/\s/.test(ch)) { while (i < s.length && /\s/.test(s[i])) i++; t.push({ k: 'sp' }); continue; }
+    if ((m = /^(\d+(\.\d+)?|\.\d+)/.exec(rest))) { t.push({ k: 'n', v: m[0] }); i += m[0].length; continue; }
+    if ((m = /^[A-Za-z]+/.exec(rest))) { t.push(m[0] === 'sqrt' ? { k: 'sqrt' } : { k: 'w', v: m[0] }); i += m[0].length; continue; }
+    if (TWOCH.has(rest.slice(0, 2))) { t.push({ k: 'o', v: TWOCH.get(rest.slice(0, 2)) }); i += 2; continue; }
+    if ('()^_/'.includes(ch)) { t.push({ k: ch }); i++; continue; }
+    if (',;:'.includes(ch)) { t.push({ k: 'p', v: ch }); i++; continue; }
+    t.push({ k: 'o', v: ONECH.get(ch) || ch }); i++;
+  }
+  return t;
+}
+
+// Geometry symbols are drawn as shapes, so a saved drawing looks the same on every device, whatever fonts it has.
+const tilde = (g, x, y) => { g.moveTo(x + 6, y - 24); g.quadraticCurveTo(x + 20, y - 52, x + 35, y - 34); g.quadraticCurveTo(x + 50, y - 16, x + 64, y - 44); };
+const VEC = new Map([
+  ['∠', [80, 62, 6, (g, x, y) => { g.moveTo(x + 68, y); g.lineTo(x + 8, y); g.lineTo(x + 60, y - 54); }]],
+  ['△', [92, 70, 6, (g, x, y) => { g.moveTo(x + 8, y); g.lineTo(x + 46, y - 64); g.lineTo(x + 84, y); g.closePath(); }]],
+  ['⊥', [70, 66, 6, (g, x, y) => { g.moveTo(x + 8, y); g.lineTo(x + 62, y); g.moveTo(x + 35, y); g.lineTo(x + 35, y - 64); }]],
+  ['∥', [56, 66, 6, (g, x, y) => { g.moveTo(x + 14, y + 4); g.lineTo(x + 28, y - 64); g.moveTo(x + 34, y + 4); g.lineTo(x + 48, y - 64); }]],
+  ['∼', [70, 56, 6, (g, x, y) => { tilde(g, x, y); }]],
+  ['≅', [70, 64, 6, (g, x, y) => { tilde(g, x, y - 14); g.moveTo(x + 8, y - 22); g.lineTo(x + 62, y - 22); g.moveTo(x + 8, y - 6); g.lineTo(x + 62, y - 6); }]],
+]);
+function vbox([w, a, d, path]) {
+  return { w, a, d, draw(g, x, y) { g.save(); g.lineWidth = 6; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); path(g, x, y); g.stroke(); g.restore(); } };
+}
+function tbox(g, str, italic) {
+  if (!italic && VEC.has(str)) return vbox(VEC.get(str));
+  const f = (italic ? 'italic ' : '') + '100px ' + MFONT;
+  g.font = f;
+  const w = g.measureText(str).width + (italic ? 4 : 0);
+  return { w, a: 74, d: 22, draw(g2, x, y) { g2.font = f; g2.textAlign = 'left'; g2.textBaseline = 'alphabetic'; g2.fillText(str, x, y); } };
+}
+function gap(w) { return { w, a: 0, d: 0, gap: true, draw() {} }; }
+function hbox(list) {
+  let w = 0, a = 0, d = 0;
+  for (const b of list) { w += b.w; a = Math.max(a, b.a); d = Math.max(d, b.d); }
+  return { w, a, d, draw(g, x, y) { let cx = x; for (const b of list) { b.draw(g, cx, y); cx += b.w; } } };
+}
+function scaled(b, k) {
+  return { w: b.w * k, a: b.a * k, d: b.d * k, draw(g, x, y) { g.save(); g.translate(x, y); g.scale(k, k); b.draw(g, 0, 0); g.restore(); } };
+}
+function pbox(c) {                                // round brackets that grow with their content
+  const A = Math.max(c.a, 74) + 6, D = Math.max(c.d, 22) + 6, P = 20, mid = (D - A) / 2;
+  return { w: c.w + 2 * P, a: A, d: D, draw(g, x, y) {
+    c.draw(g, x + P, y);
+    g.save(); g.lineWidth = 6; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x + P - 2, y - A); g.quadraticCurveTo(x - 2, y + mid, x + P - 2, y + D); g.stroke();
+    const xr = x + P + c.w + 2;
+    g.beginPath(); g.moveTo(xr, y - A); g.quadraticCurveTo(xr + P, y + mid, xr, y + D); g.stroke();
+    g.restore(); } };
+}
+function fbox(n0, d0) {
+  const n = scaled(n0, 0.9), d = scaled(d0, 0.9), bw = Math.max(n.w, d.w) + 16, bar = 30, gp = 10;
+  return { w: bw + 8, a: bar + gp + n.d + n.a, d: Math.max(0, d.a + gp - bar + d.d), draw(g, x, y) {
+    n.draw(g, x + 4 + (bw - n.w) / 2, y - bar - gp - n.d);
+    d.draw(g, x + 4 + (bw - d.w) / 2, y - bar + gp + d.a);
+    g.save(); g.lineWidth = 6; g.beginPath(); g.moveTo(x + 4, y - bar); g.lineTo(x + 4 + bw, y - bar); g.stroke(); g.restore(); } };
+}
+function sbox(c) {
+  const top = c.a + 12, bot = c.d + 4, T = 56;
+  return { w: T + c.w + 10, a: top + 4, d: bot, draw(g, x, y) {
+    g.save(); g.lineWidth = 6; g.lineJoin = 'round'; g.lineCap = 'round'; g.beginPath();
+    g.moveTo(x + 4, y - 26); g.lineTo(x + 16, y - 34); g.lineTo(x + 32, y + bot); g.lineTo(x + T - 4, y - top); g.lineTo(x + T + c.w + 8, y - top);
+    g.stroke(); g.restore();
+    c.draw(g, x + T, y); } };
+}
+function withScripts(base, sup, sub) {
+  if (!sup && !sub) return base;
+  const S = sup && scaled(sup, 0.7), B = sub && scaled(sub, 0.7);
+  const up = S ? Math.max(42, base.a - 38) : 0, dn = B ? Math.max(28, base.d + 6) : 0;
+  return { w: base.w + Math.max(S ? S.w : 0, B ? B.w : 0) + 2, a: Math.max(base.a, S ? up + S.a : 0), d: Math.max(base.d, B ? dn + B.d : 0),
+    draw(g, x, y) { base.draw(g, x, y); if (S) S.draw(g, x + base.w + 1, y - up); if (B) B.draw(g, x + base.w + 1, y + dn); } };
+}
+
+function mathBox(str, g) {
+  try {
+    const T = mtok(str); let i = 0, guard = 0;
+    const skipSp = () => { while (T[i] && T[i].k === 'sp') i++; };
+    const isStart = t => t && (t.k === 'n' || t.k === 'w' || t.k === 'sqrt' || t.k === '(');
+    const wordBoxes = v => SYMS.has(v) ? [tbox(g, SYMS.get(v), false)] : FUNCS.has(v) ? [tbox(g, v, false)]
+      : [...v].map(ch => tbox(g, ch, ch === ch.toLowerCase()));
+
+    function scriptArg() {
+      const t = T[i]; if (!t) return null;
+      if (t.k === '(') { i++; const inner = seq(true).box; if (T[i] && T[i].k === ')') i++; return inner; }
+      let sign = null;
+      if (t.k === 'o' && (t.v === '−' || t.v === '+') && T[i + 1] && (T[i + 1].k === 'n' || T[i + 1].k === 'w')) { sign = tbox(g, t.v, false); i++; }
+      const u = T[i]; let b = null;
+      if (u && u.k === 'n') { i++; b = tbox(g, u.v, false); }
+      else if (u && u.k === 'w') {
+        if (SYMS.has(u.v) || FUNCS.has(u.v)) { i++; b = wordBoxes(u.v)[0]; }
+        else { const ch = u.v[0]; if (u.v.length > 1) T[i] = { k: 'w', v: u.v.slice(1) }; else i++; b = tbox(g, ch, ch === ch.toLowerCase()); }
+      }
+      return sign ? (b ? hbox([sign, b]) : sign) : b;
+    }
+    function scripts(base) {
+      let sup = null, sub = null;
+      while (T[i] && (T[i].k === '^' || T[i].k === '_') && ++guard < 6000) {
+        const isSup = T[i].k === '^'; i++;
+        const arg = scriptArg(); if (!arg) break;
+        if (isSup) sup = arg; else sub = arg;
+      }
+      return withScripts(base, sup, sub);
+    }
+    function primary() {
+      const t = T[i++];
+      if (t.k === 'n') return { list: [tbox(g, t.v, false)] };
+      if (t.k === 'w') return { list: wordBoxes(t.v) };
+      if (t.k === 'sqrt') {
+        let rad;
+        if (T[i] && T[i].k === '(') { i++; rad = seq(true).box; if (T[i] && T[i].k === ')') i++; }
+        else if (T[i] && (T[i].k === 'n' || T[i].k === 'w')) rad = hbox(primary().list);
+        else rad = gap(30);
+        return { list: [sbox(rad)] };
+      }
+      const inner = seq(true).box; if (T[i] && T[i].k === ')') i++;      // '('
+      return { list: [pbox(inner)], group: inner };
+    }
+    function term() {
+      const parts = []; let grp = null;
+      while (isStart(T[i]) && ++guard < 6000) {
+        const p = primary(), last = p.list.pop();
+        parts.push(...p.list);
+        const hadScript = !!(T[i] && (T[i].k === '^' || T[i].k === '_'));
+        parts.push(scripts(last));
+        grp = (p.group && !hadScript) ? p.group : null;
+      }
+      return { box: hbox(parts), grp: parts.length === 1 ? grp : null };
+    }
+    function seq(inParen) {
+      const out = []; let prevOp = true;
+      const lastIsGap = () => out.length && out[out.length - 1].gap;
+      while (i < T.length && ++guard < 6000) {
+        const t = T[i];
+        if (t.k === ')') { if (inParen) break; i++; out.push(tbox(g, ')', false)); prevOp = false; continue; }
+        if (t.k === 'sp') { i++; if (out.length && !lastIsGap()) out.push(gap(14)); continue; }
+        if (t.k === 'p') { i++; out.push(tbox(g, t.v, false)); skipSp(); out.push(gap(14)); prevOp = true; continue; }
+        if (t.k === 'o') {
+          i++;
+          if (BIN.has(t.v) && !(UNARY.has(t.v) && prevOp)) {
+            if (lastIsGap()) out.pop();
+            out.push(gap(16), tbox(g, t.v, false), gap(16)); skipSp(); prevOp = true;
+          } else { out.push(tbox(g, t.v, false)); prevOp = BIN.has(t.v); }
+          continue;
+        }
+        if (isStart(t)) {
+          let cur = term();
+          while (T[i] && T[i].k === '/') {
+            i++;
+            const den = isStart(T[i]) ? term() : null;
+            cur = { box: fbox(cur.grp || cur.box, den ? (den.grp || den.box) : gap(20)), grp: null };
+          }
+          out.push(cur.box); prevOp = false; continue;
+        }
+        i++; out.push(tbox(g, t.k, false)); prevOp = false;                // stray / ^ _
+      }
+      while (out.length && out[out.length - 1].gap) out.pop();
+      return { box: hbox(out) };
+    }
+    return seq(false).box;
+  } catch (e) { return tbox(g, String(str).slice(0, 200), false); }
+}
+function drawMath(g, it, color) {
+  const b = mathBox(it.s, g), k = SIZES[it.z] / 100;
+  g.save(); g.translate(it.x, it.y); g.scale(k, k);
+  g.fillStyle = color; g.strokeStyle = color; g.lineCap = 'round'; g.setLineDash([]);
+  b.draw(g, 0, 0); g.restore();
+}
+function mathBBox(g, it) {
+  if (it._bb) return it._bb;
+  const b = mathBox(it.s, g), k = SIZES[it.z] / 100;
+  return (it._bb = { x: it.x, y: it.y - b.a * k, w: b.w * k, h: (b.a + b.d) * k });
+}
+// MATH-END
+
+// ---------- State ----------
+const c = $('c'), ctx = c.getContext('2d');
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+function setLayout(h) {
+  H = h; c.width = W * dpr; c.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.style.aspectRatio = W + ' / ' + H;
+}
+setLayout(H);
+
+let items = [], undoS = [], redoS = [];
+let tool = 'pen', color = 0, width = 1, mz = 1, mathEdit = null;
+let bg = 'blank', docRaw = null, bgImg = null;
+
+function safeURL(u) {                             // background images: same site, or a host listed in IMAGE_HOSTS
+  try { const x = new URL(u, location.href);
+    if (!/^(https?|file):$/.test(x.protocol)) return null;
+    if (x.origin === location.origin || (x.protocol === 'https:' && IMAGE_HOSTS.includes(x.hostname))) return x.href;
+    return null; } catch (e) { return null; }
+}
+const bgKey = () => bg === 'doc' ? 'doc' : bg;   // the image address is never put into a save code
+function setBg(key) {
+  if (key === 'doc' || key.startsWith('doc:')) {
+    const raw = key === 'doc' ? docRaw : key.slice(4), u = raw && safeURL(raw);
+    if (!u) { bg = 'blank'; if (raw) say('That background image is not on an allowed site, so it was not loaded.'); }
+    else { docRaw = raw; bg = 'doc'; ensureDocOption(); bgImg = new Image(); bgImg.onload = redraw; bgImg.src = u; }
+  } else { bg = PRESETS[key] ? key : 'blank'; }
+  $('bg').value = bg;
+  $('snapLbl').hidden = !((bg === 'grid' || bg === 'axes') && toolsOn.has('line'));
+}
+function ensureDocOption() {
+  if ([...$('bg').options].some(o => o.value === 'doc')) return;
+  const o = document.createElement('option'); o.value = 'doc'; o.textContent = 'Document'; $('bg').appendChild(o);
+}
+
+// ---------- Drawing ----------
+function drawBg(g) {
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  if (bg === 'grid' || bg === 'axes') {
+    g.lineWidth = 1;
+    for (let x = 0; x <= W; x += 30) { g.strokeStyle = x % 150 === 0 ? '#aeb9c9' : '#dfe5ee'; line(g, x + .5, 0, x + .5, H); }
+    for (let y = 0; y <= H; y += 30) { g.strokeStyle = y % 150 === 0 ? '#aeb9c9' : '#dfe5ee'; line(g, 0, y + .5, W, y + .5); }
+    if (bg === 'axes') {
+      const ox = 450, oy = H / 2;
+      g.strokeStyle = '#222'; g.fillStyle = '#222'; g.lineWidth = 2;
+      line(g, 0, oy, W, oy); line(g, ox, 0, ox, H);
+      g.beginPath(); g.moveTo(W - 2, oy); g.lineTo(W - 12, oy - 5); g.lineTo(W - 12, oy + 5); g.fill();
+      g.beginPath(); g.moveTo(ox, 2); g.lineTo(ox - 5, 12); g.lineTo(ox + 5, 12); g.fill();
+      g.font = '11px system-ui,sans-serif'; g.fillStyle = '#444'; g.textAlign = 'center';
+      for (let k = -15; k <= 15; k += 5) if (k) g.fillText(String(k), ox + k * 30, oy + 15);
+      g.textAlign = 'left';
+      for (let k = -(oy / 30); k <= oy / 30; k += 5) if (k) g.fillText(String(k), ox + 5, oy - k * 30 + 4);
+    }
+  } else if (bg === 'lined') {
+    g.strokeStyle = '#c7d3e6'; g.lineWidth = 1;
+    for (let y = 40; y < H; y += 40) line(g, 0, y + .5, W, y + .5);
+  } else if (bg === 'doc' && bgImg && bgImg.complete && bgImg.naturalWidth) {
+    const s = Math.min(W / bgImg.naturalWidth, H / bgImg.naturalHeight);
+    const w = bgImg.naturalWidth * s, h = bgImg.naturalHeight * s;
+    g.drawImage(bgImg, (W - w) / 2, (H - h) / 2, w, h);
+  }
+}
+function line(g, x1, y1, x2, y2) { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
+function style(g, s) { g.strokeStyle = g.fillStyle = COLORS[s.c]; g.lineWidth = WIDTHS[s.w]; g.lineCap = g.lineJoin = 'round'; }
+function drawStroke(g, s) {
+  style(g, s); const p = s.p, n = p.length;
+  if (n < 4) { g.beginPath(); g.arc(p[0], p[1], WIDTHS[s.w] / 2, 0, 6.2832); g.fill(); return; }
+  g.beginPath(); g.moveTo(p[0], p[1]);
+  for (let i = 2; i < n - 2; i += 2) g.quadraticCurveTo(p[i], p[i + 1], (p[i] + p[i + 2]) / 2, (p[i + 1] + p[i + 3]) / 2);
+  g.lineTo(p[n - 2], p[n - 1]); g.stroke();
+}
+function redraw() {
+  drawBg(ctx);
+  for (const it of items) { if (it.s !== undefined) drawMath(ctx, it, COLORS[it.c]); else drawStroke(ctx, it); }
+  if (mathEdit) {                                  // live preview of the equation being typed
+    const s = $('mIn').value, tmp = { x: mathEdit.x, y: mathEdit.y, z: mathEdit.z, s };
+    ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#0b5fff'; ctx.setLineDash([6, 4]);
+    if (s.trim()) { drawMath(ctx, tmp, COLORS[mathEdit.c]); const b = mathBBox(ctx, tmp); ctx.strokeRect(b.x - 6, b.y - 6, b.w + 12, b.h + 12); }
+    else { line(ctx, mathEdit.x - 10, mathEdit.y, mathEdit.x + 10, mathEdit.y); line(ctx, mathEdit.x, mathEdit.y - 10, mathEdit.x, mathEdit.y + 10); }
+    ctx.restore();
+  }
+}
+
+// ---------- Pointer input (pen, mouse, touch) ----------
+let cur = null, pid = null, penSeen = false, erasePushed = false;
+const snapOn = () => !$('snapLbl').hidden && $('snap').checked;
+function pt(e, snap) {
+  const r = c.getBoundingClientRect();
+  let x = Math.round((e.clientX - r.left) * W / r.width), y = Math.round((e.clientY - r.top) * H / r.height);
+  if (snap && snapOn()) { x = Math.round(x / 30) * 30; y = Math.round(y / 30) * 30; }
+  return [Math.max(0, Math.min(W, x)), Math.max(0, Math.min(H, y))];
+}
+c.addEventListener('pointerdown', e => {
+  if (VIEW || BUILD || pid !== null) return;
+  if (e.pointerType === 'pen') penSeen = true;
+  if (e.pointerType === 'touch' && penSeen && !$('finger').checked) return;   // palm rejection
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault();
+  if (tool === 'math') { const [x, y] = pt(e); openMath(x, y); return; }
+  pid = e.pointerId; try { c.setPointerCapture(pid); } catch (err) {}
+  const [x, y] = pt(e, tool === 'line');
+  if (tool === 'pen') { cur = { c: color, w: width, p: [x, y] }; style(ctx, cur); ctx.beginPath(); ctx.arc(x, y, WIDTHS[width] / 2, 0, 6.2832); ctx.fill(); }
+  else if (tool === 'line') cur = { c: color, w: width, p: [x, y, x, y] };
+  else { erasePushed = false; eraseAt(x, y); }
+});
+c.addEventListener('pointermove', e => {
+  if (e.pointerId !== pid) return;
+  e.preventDefault();
+  if (tool === 'line') { const [x, y] = pt(e, true); cur.p[2] = x; cur.p[3] = y; redraw(); drawStroke(ctx, cur); return; }
+  const list = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  for (const ev of (list.length ? list : [e])) {
+    const [x, y] = pt(ev);
+    if (tool === 'pen') {
+      const p = cur.p, n = p.length, dx = x - p[n - 2], dy = y - p[n - 1];
+      if (dx * dx + dy * dy < 4) continue;
+      style(ctx, cur); line(ctx, p[n - 2], p[n - 1], x, y); p.push(x, y);
+    } else eraseAt(x, y);
+  }
+});
+function endStroke(e) {
+  if (e.pointerId !== pid) return;
+  pid = null;
+  if (tool === 'pen' && cur) { snapshot(); items.push(cur); cur = null; redraw(); persist(); }
+  else if (tool === 'line' && cur) {
+    const p = cur.p; if (Math.hypot(p[2] - p[0], p[3] - p[1]) >= 3) { snapshot(); items.push(cur); persist(); }
+    cur = null; redraw();
+  } else if (erasePushed) persist();
+  syncButtons();
+}
+c.addEventListener('pointerup', endStroke);
+c.addEventListener('pointercancel', endStroke);
+c.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---------- Eraser (removes whole strokes or equations it touches) ----------
+function distSeg(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+  const t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+function hit(s, x, y, r) {
+  const p = s.p;
+  if (p.length < 4) return Math.hypot(x - p[0], y - p[1]) <= r;
+  for (let i = 0; i < p.length - 2; i += 2) if (distSeg(x, y, p[i], p[i + 1], p[i + 2], p[i + 3]) <= r) return true;
+  return false;
+}
+function inBox(it, x, y, pad) { const b = mathBBox(ctx, it); return x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad; }
+function eraseAt(x, y) {
+  const keep = items.filter(s => s.s !== undefined ? !inBox(s, x, y, 8) : !hit(s, x, y, 14 + WIDTHS[s.w] / 2));
+  if (keep.length === items.length) return;
+  if (!erasePushed) { snapshot(); erasePushed = true; }
+  items = keep; redraw();
+}
+
+// ---------- Undo / redo / clear ----------
+function snapshot() { undoS.push(items.slice()); if (undoS.length > 100) undoS.shift(); redoS = []; }
+function undo() { if (mathEdit) cancelMath(); if (!undoS.length) return; redoS.push(items.slice()); items = undoS.pop(); redraw(); persist(); syncButtons(); }
+function redo() { if (mathEdit) cancelMath(); if (!redoS.length) return; undoS.push(items.slice()); items = redoS.pop(); redraw(); persist(); syncButtons(); }
+function syncButtons() { $('undo').disabled = !undoS.length; $('redo').disabled = !redoS.length; }
+let clearTimer = null;
+$('clear').onclick = () => {
+  if (!clearTimer) {                              // two taps, because confirm() can be blocked in embedded pages
+    $('clear').textContent = 'Tap again to clear';
+    clearTimer = setTimeout(() => { clearTimer = null; $('clear').textContent = 'Clear'; }, 3000); return;
+  }
+  clearTimeout(clearTimer); clearTimer = null; $('clear').textContent = 'Clear';
+  if (mathEdit) cancelMath();
+  if (items.length) { snapshot(); items = []; redraw(); persist(); syncButtons(); }
+};
+$('undo').onclick = undo; $('redo').onclick = redo;
+
+// ---------- Equation entry ----------
+const KEYS = {
+  algebra: [['a/b', '()/()', 4], ['x²', '^2', 0], ['xⁿ', '^()', 1], ['√', 'sqrt()', 1], ['π', 'pi', 0], ['x', 'x', 0], ['y', 'y', 0],
+    ['(', '(', 0], [')', ')', 0], ['×', '×', 0], ['÷', '÷', 0], ['±', '±', 0], ['=', '=', 0], ['<', '<', 0], ['>', '>', 0],
+    ['≤', '≤', 0], ['≥', '≥', 0], ['≠', '≠', 0]],
+  geometry: [['a/b', '()/()', 4], ['x²', '^2', 0], ['√', 'sqrt()', 1], ['π', 'pi', 0], ['°', '°', 0], ['∠', '∠', 0], ['△', '△', 0],
+    ['⊥', '⊥', 0], ['∥', '∥', 0], ['≅', '≅', 0], ['∼', '∼', 0], ['≈', '≈', 0], ['xₙ', '_()', 1], ['′', '′', 0],
+    ['(', '(', 0], [')', ')', 0], ['×', '×', 0], ['÷', '÷', 0], ['=', '=', 0]],
+};
+function insertKey(ins, back) {
+  const el = $('mIn'), a = el.selectionStart == null ? el.value.length : el.selectionStart, b = el.selectionEnd == null ? a : el.selectionEnd;
+  el.value = el.value.slice(0, a) + ins + el.value.slice(b);
+  const pos = a + ins.length - back; el.focus(); el.setSelectionRange(pos, pos); redraw();
+}
+function buildKeys() {
+  const which = params.get('keys') || 'algebra';
+  const defs = which === 'both' ? [...KEYS.algebra, ...KEYS.geometry.filter(k => !KEYS.algebra.some(a => a[0] === k[0]))] : (KEYS[which] || KEYS.algebra);
+  defs.forEach(([label, ins, back]) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'key'; b.textContent = label; b.setAttribute('aria-label', 'Insert ' + label);
+    b.onclick = () => insertKey(ins, back); $('keys').appendChild(b);
+  });
+  $('keys').addEventListener('pointerdown', e => e.preventDefault());           // keeps the typing box focused
+  SIZE_NAMES.forEach((n, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = n[0]; b.setAttribute('aria-label', n + ' text');
+    b.setAttribute('aria-pressed', i === mz);
+    b.onclick = () => { mz = i; if (mathEdit) mathEdit.z = i; [...$('mSizes').children].forEach((x, j) => x.setAttribute('aria-pressed', j === i)); redraw(); };
+    $('mSizes').appendChild(b);
+  });
+}
+function openMath(x, y) {
+  if (mathEdit) { mathEdit.x = x; mathEdit.y = y + SIZES[mathEdit.z] * 0.3; redraw(); $('mIn').focus(); return; }   // tap elsewhere = move
+  const found = [...items].reverse().find(it => it.s !== undefined && inBox(it, x, y, 6));
+  if (found) {                                    // tap existing equation = edit it
+    snapshot(); items = items.filter(it => it !== found);
+    mathEdit = { x: found.x, y: found.y, z: found.z, c: found.c, orig: found };
+    $('mIn').value = found.s;
+  } else { mathEdit = { x, y: y + SIZES[mz] * 0.3, z: mz, c: color, orig: null }; $('mIn').value = ''; }
+  $('mathPanel').hidden = false; redraw(); $('mIn').focus();
+  try { $('mathPanel').scrollIntoView({ block: 'nearest' }); } catch (e) {}
+}
+function closeMath() { mathEdit = null; $('mathPanel').hidden = true; $('mIn').value = ''; }
+function commitMath() {
+  if (!mathEdit) return;
+  const s = $('mIn').value.trim().slice(0, 200), m = mathEdit;
+  if (!m.orig && s) snapshot();
+  if (s) items.push({ c: m.c, x: m.x, y: m.y, z: m.z, s });
+  closeMath(); redraw(); persist(); syncButtons();
+}
+function cancelMath() {
+  if (!mathEdit) return;
+  if (mathEdit.orig) { items.push(mathEdit.orig); undoS.pop(); }
+  closeMath(); redraw(); syncButtons();
+}
+$('mOk').onclick = commitMath; $('mCancel').onclick = cancelMath;
+$('mIn').addEventListener('input', redraw);
+$('mIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commitMath(); } else if (e.key === 'Escape') cancelMath(); });
+
+// ---------- Toolbar ----------
+const TOOL_DEFS = { pen: 'Pen', line: 'Line', math: 'Math', eraser: 'Eraser' };
+const toolsOn = new Set((params.get('tools') || 'pen,line,math,eraser').split(',').filter(t => TOOL_DEFS[t]));
+if (!toolsOn.size) Object.keys(TOOL_DEFS).forEach(t => toolsOn.add(t));
+function setTool(t) {
+  if (mathEdit && t !== 'math') commitMath();
+  tool = t === 'eraser' ? 'er' : t;
+  [...$('tools').children].forEach(b => b.setAttribute('aria-pressed', b.dataset.t === t));
+  c.style.cursor = t === 'pen' || t === 'line' ? 'crosshair' : t === 'math' ? 'text' : 'cell';
+}
+Object.entries(TOOL_DEFS).forEach(([t, label]) => {
+  if (!toolsOn.has(t)) return;
+  const b = document.createElement('button'); b.type = 'button'; b.dataset.t = t; b.textContent = label; b.setAttribute('aria-pressed', 'false');
+  b.onclick = () => setTool(t); $('tools').appendChild(b);
+});
+COLORS.forEach((col, i) => {
+  const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', COLOR_NAMES[i]);
+  b.setAttribute('aria-pressed', i === color); b.innerHTML = '<span class="sw" style="background:' + col + '"></span>';
+  b.onclick = () => {
+    color = i; if (mathEdit) { mathEdit.c = i; redraw(); }
+    else if (tool === 'er' && toolsOn.has('pen')) setTool('pen');
+    [...$('colors').children].forEach((x, j) => x.setAttribute('aria-pressed', j === i));
+  };
+  $('colors').appendChild(b);
+});
+WIDTHS.forEach((w, i) => {
+  const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', WIDTH_NAMES[i]);
+  b.setAttribute('aria-pressed', i === width); b.innerHTML = '<span class="wd" style="width:' + (w + 4) + 'px;height:' + (w + 4) + 'px"></span>';
+  b.onclick = () => { width = i; if (tool === 'er' && toolsOn.has('pen')) setTool('pen'); [...$('widths').children].forEach((x, j) => x.setAttribute('aria-pressed', j === i)); };
+  $('widths').appendChild(b);
+});
+Object.entries(PRESETS).forEach(([k, v]) => { const o = document.createElement('option'); o.value = k; o.textContent = v; $('bg').appendChild(o); });
+$('bg').onchange = e => { setBg(e.target.value === 'doc' ? 'doc' : e.target.value); redraw(); persist(); };
+
+// ---------- Messages, autosave, copy ----------
+function say(m) { $('status').textContent = m; }
+const SKEY = 'wb2:' + location.pathname + '?' + (params.get('id') || '');
+function persist() { if (VIEW || BUILD) return; try { sessionStorage.setItem(SKEY, pack(bgKey(), items, params.get('id'))); } catch (e) {} }
+async function copyFrom(box, msg) {
+  try { await navigator.clipboard.writeText(box.value); msg('Copied.'); return; } catch (e) {}
+  box.focus(); box.select(); box.setSelectionRange(0, box.value.length);
+  try { msg(document.execCommand('copy') ? 'Copied.' : 'Select all the text, copy it, and paste it where you need it.'); }
+  catch (e) { msg('Select all the text, copy it, and paste it where you need it.'); }
+}
+
+// ---------- Student: create save code ----------
+$('save').onclick = async () => {
+  if (mathEdit) commitMath();
+  if (!items.length) { say('Nothing is drawn yet.'); return; }
+  try {
+    const code = await encode(bgKey(), items, params.get('id'));
+    const out = LINK ? teacherLink(code) : code;
+    $('box').value = out; $('box').hidden = false; $('copy').hidden = false;
+    say((LINK ? 'Save link' : 'Save code') + ' created (' + (out.length / 1024).toFixed(1) + ' KB). Copy it and paste it into the answer box.');
+    if (SAVE_URL) {
+      try { const r = await fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+        const j = await r.json(); if (j && j.id) say('Saved. Your Save ID is ' + j.id + '. Type it into the answer box.'); }
+      catch (e) { say('Could not reach the save server. Use the save code instead.'); }
+    }
+  } catch (e) { say('Could not create a code in this browser.'); }
+};
+$('copy').onclick = () => copyFrom($('box'), m => say(m === 'Copied.' ? 'Copied. Paste it into the answer box.' : m));
+
+// ---------- Teacher: show a student's drawing ----------
+$('load').onclick = async () => {
+  try {
+    const d = await decode($('inBox').value);
+    items = d.items; undoS = []; redoS = []; setLayout(d.h);
+    // The viewer only ever uses its OWN background setting, never one named inside a student's code.
+    if (d.bg === 'doc') { if (docRaw) setBg('doc'); else { setBg('blank'); } }
+    else setBg(PRESETS[d.bg] ? d.bg : 'blank');
+    redraw();
+    const n = items.length;
+    say((d.q ? 'Question ' + d.q + ': ' : '') + n + ' item' + (n === 1 ? '' : 's') +
+      (d.bg === 'doc' && !docRaw ? '. This was drawn on a document background: open your grading link from the Question builder to see it.' : '.'));
+  } catch (e) { say('That does not look like a complete, valid save code. Check that the whole code was pasted.'); }
+};
+
+// ---------- Teacher: question builder ----------
+function initBuild() {
+  ['bar', 'saveRow', 'mathPanel'].forEach(id => $(id).hidden = true); c.hidden = true; $('status').hidden = true;
+  $('buildRow').hidden = false;
+  $('bBase').value = location.protocol + '//' + location.host + location.pathname;
+  Object.entries(PRESETS).forEach(([k, v]) => { const o = document.createElement('option'); o.value = k; o.textContent = v; $('bBg').appendChild(o); });
+  const io = document.createElement('option'); io.value = 'image'; io.textContent = 'Image (a page, worksheet or diagram)'; $('bBg').appendChild(io);
+  function update() {
+    const q = new URLSearchParams(), v = new URLSearchParams({ mode: 'view' });
+    q.set('id', $('bId').value.trim() || 'q1');
+    const bgv = $('bBg').value; $('bImgLbl').hidden = bgv !== 'image';
+    const img = $('bImg').value.trim();
+    const bgParam = bgv === 'image' ? img : (bgv === 'blank' ? '' : bgv);
+    if (bgParam) { q.set('bg', bgParam); v.set('bg', bgParam); }
+    if ($('bLayout').value === 'portrait') { q.set('layout', 'portrait'); v.set('layout', 'portrait'); }
+    const tl = [...document.querySelectorAll('.bTool')].filter(x => x.checked).map(x => x.value);
+    if (tl.length && tl.length < 4) q.set('tools', tl.join(','));
+    if ($('bKeys').value !== 'algebra') q.set('keys', $('bKeys').value);
+    if ($('bLock').checked && bgParam) q.set('lock', '1');
+    const base = $('bBase').value.trim();
+    if ($('bLink').checked) q.set('view', base);
+    const sep = $('bHash').checked ? '#' : '?', fix = s => s.replace(/%2C/g, ',');
+    const src = base + sep + fix(q.toString()), h = Math.max(400, Number($('bHeight').value) || 800);
+    $('bOut').value = '<iframe src="' + src.replace(/&/g, '&amp;') + '" title="Scratchpad" width="100%" height="' + h + '" style="border:0" allow="clipboard-write"></iframe>';
+    $('bView').value = base + sep + fix(v.toString());
+    $('bMsg').textContent = bgv === 'image' && !img ? 'Type the image file name above. Upload the image to the same folder as this page.' :
+      bgv === 'image' ? 'The image must be in the same folder as this page (or on a host listed in IMAGE_HOSTS). Pages from a PDF work best saved as PNG or JPG.' : '';
+    if ($('bPrev').dataset.src !== src) { $('bPrev').dataset.src = src; $('bPrev').src = src; }
+    $('bPrev').style.height = h + 'px';
+  }
+  document.querySelectorAll('#buildRow input, #buildRow select').forEach(el => { el.addEventListener('input', update); el.addEventListener('change', update); });
+  $('bLayout').addEventListener('change', () => { $('bHeight').value = $('bLayout').value === 'portrait' ? 1500 : 800; update(); });
+  $('bCopy').onclick = () => copyFrom($('bOut'), m => $('bMsg').textContent = m);
+  $('bCopyView').onclick = () => copyFrom($('bView'), m => $('bMsg').textContent = m);
+  update();
+}
+
+// ---------- Startup ----------
+(function init() {
+  buildKeys();
+  const first = ['pen', 'line', 'math', 'eraser'].find(t => toolsOn.has(t));
+  setTool(first);
+  const bp = params.get('bg') || 'blank';
+  setBg(PRESETS[bp] ? bp : 'doc:' + bp);
+  if (params.get('lock') === '1') $('bg').hidden = true;
+  if (LINK && !VIEW && !BUILD) {
+    $('save').textContent = 'Create save link'; $('copy').textContent = 'Copy link';
+    $('stuHint').innerHTML = 'Draw with Apple Pencil or a mouse (turn on "Draw with finger" to use a finger). ' +
+      'When you are done, press <b>Create save link</b>, copy the text, and paste it into the answer box.';
+  }
+  if (VIEW) {
+    $('bar').hidden = true; $('saveRow').hidden = true; $('viewRow').hidden = false;
+    $('inBox').addEventListener('paste', () => setTimeout(() => $('load').click(), 0));   // showing the drawing needs no button press
+    const linked = params.get('code');
+    if (linked) { $('inBox').value = linked; $('load').click(); }                          // opened from a student's link
+    else if (window.top === window) { try { $('inBox').focus(); } catch (e) {} }
+  } else if (BUILD) {
+    initBuild();
+  } else {
+    try { const saved = sessionStorage.getItem(SKEY);
+      if (saved) { const d = unpack(saved); items = d.items; if (!params.get('bg')) setBg(d.bg === 'doc' ? 'blank' : d.bg); } } catch (e) {}
+  }
+  redraw(); syncButtons();
+})();
+})();
+</script>
+</body>
+</html>
