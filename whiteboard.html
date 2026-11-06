@@ -41,6 +41,8 @@
   .row input[type=text], .row input[type=number], .row select { min-height:40px; padding:0 8px; border:1px solid var(--line); border-radius:8px; font:inherit; }
   #nIn { flex:1; min-width:200px; height:72px; font:16px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif; padding:8px; }
   #notePanel { margin-top:8px; padding:8px; border:1px solid var(--accent); border-radius:8px; background:#fffdf0; }
+  #bList .qrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); }
+  #bList .qrow span { flex:1; min-width:180px; }
   #pager { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 8px; }
   #pager b { min-width:110px; text-align:center; }
   #qPrompt { white-space:pre-wrap; border-left:4px solid var(--accent); background:#f5f8ff; padding:8px 12px; margin:0 0 8px;
@@ -155,6 +157,7 @@
     <p class="hint" id="bPgInfo"></p>
     <div class="row">
       <label><input type="checkbox" id="bLink"> Students paste a one-click link instead of a code (opens the drawing straight from SpeedGrader)</label>
+      <label><input type="checkbox" id="bInc"> ...and put the excerpt or pictures inside that link too (longer link, but it opens complete)</label>
     </div>
     <div class="row">
       <b>Tools:</b>
@@ -173,6 +176,17 @@
     <textarea id="bView" readonly spellcheck="false" style="height:56px"></textarea>
     <button id="bCopyView" type="button">Copy grading link</button>
     <p class="hint" id="bMsg"></p>
+    <div class="row"><button id="bAdd" type="button" class="primary">Add this question to the assignment</button>
+      <span class="hint" style="margin:0">Fill in one question above, add it, then change the Question ID and fill in the next.</span></div>
+    <div id="bAsg" style="margin-top:12px" hidden>
+      <h3 style="margin:4px 0">Your assignment</h3>
+      <div id="bList"></div>
+      <label for="bSet" style="display:block;margin-top:10px"><b>One grading link for the whole assignment</b> (save it; open it, then paste any student's code or link)</label>
+      <textarea id="bSet" readonly spellcheck="false" style="height:70px"></textarea>
+      <button id="bCopySet" type="button" class="primary">Copy the assignment grading link</button>
+      <button id="bClearList" type="button">Clear the list</button>
+      <p class="hint" id="bSetMsg"></p>
+    </div>
     <iframe id="bPrev" title="Preview"></iframe>
   </div>
 </div>
@@ -210,7 +224,7 @@ const VIEWBASE = (params.get('view') || '').split('#')[0];
 const LINK = /^(https?|file):/i.test(VIEWBASE);
 function teacherLink(code) {
   const v = new URLSearchParams({ mode: 'view' }); const b = params.get('bg'); if (b) v.set('bg', b);
-  const pg = params.get('pg'); if (pg && pg.length < 12000) v.set('pg', pg);      // short page content travels with the link
+  const pg = params.get('pg'); if (pg && params.get('incpg') === '1' && pg.length < 20000) v.set('pg', pg);   // only when the teacher chose longer, one-click links
   v.set('code', code);
   return VIEWBASE + '#' + v.toString();
 }
@@ -314,6 +328,23 @@ async function readPg(text) {
   });
   if (o.n) { let n = 0; p.forEach(P => { if (P.l) P.nums = P.l.map(s => (!s || s.startsWith('# ')) ? 0 : (++n % 5 === 0 ? n : 0)); }); }
   return { p, z: o.z === 1 ? 1 : 0 };
+}
+// An assignment's grading bundle: every question's page content by question ID.  BS1.<gzip, base64url of {v:1, q:{id: 'BG1...'}}>
+async function writeSet(map) {
+  const raw = new TextEncoder().encode(JSON.stringify({ v: 1, q: map }));
+  if (typeof CompressionStream === 'function') return 'BS1.' + B64(await gz(raw, true));
+  return 'BS0.' + B64(raw);
+}
+async function readSet(text) {
+  const m = String(text).replace(/\s+/g, '').match(/^BS([01])\.([A-Za-z0-9_-]+)$/);
+  if (!m || m[2].length > 8000000) throw new Error('Bad assignment link');
+  const raw = m[1] === '1' ? await gz(UB64(m[2]), false) : UB64(m[2]);
+  const o = JSON.parse(new TextDecoder().decode(raw));
+  if (!o || o.v !== 1 || !o.q || typeof o.q !== 'object' || Array.isArray(o.q)) throw new Error('Bad assignment link');
+  const ks = Object.keys(o.q); if (ks.length > 60) throw new Error('Too many questions');
+  const out = Object.create(null);
+  for (const k of ks) { if (k.length > 60 || typeof o.q[k] !== 'string' || !/^BG[01]\./.test(o.q[k])) throw new Error('Bad assignment link'); out[k] = o.q[k]; }
+  return out;
 }
 // Breaks pasted text into lines that fit the page, and the lines into pages. measure(font, text) returns a width in pixels.
 function layoutText(title, text, kind, z, measure) {
@@ -613,7 +644,7 @@ setLayout(H);
 let items = [], undoS = [], redoS = [];
 let tool = 'pen', color = 0, width = 1, mz = 1, mathEdit = null, noteEdit = null, nz = 1;
 let bg = 'blank', docRaw = null, bgImg = null;
-let page = 0, pages = 1, pgPages = [], pgZ = 0;   // multi-page questions: which page is showing, how many, and the teacher's page content
+let page = 0, pages = 1, pgPages = [], pgZ = 0, setMap = null;   // multi-page questions: which page is showing, how many, and the teacher's page content
 const onPage = it => (it.g | 0) === page;
 
 function safeURL(u) {                             // background images: same site, or a host listed in IMAGE_HOSTS
@@ -988,15 +1019,20 @@ $('load').onclick = async () => {
     const d = await decode($('inBox').value);
     items = d.items; undoS = []; redoS = []; setLayout(d.h);
     // The viewer only ever uses its OWN background setting, never one named inside a student's code.
+    let pgFound = true;
+    if (d.bg === 'pg' && setMap) {
+      if (setMap[d.q]) { try { applyPg(await readPg(setMap[d.q])); } catch (e) { pgFound = false; } }
+      else if (!params.get('pg')) { pgPages = []; pgFound = false; }       // never show another question's page under this drawing
+    }   // the assignment link supplies each question's page
     if (d.bg === 'doc') { if (docRaw) setBg('doc'); else { setBg('blank'); } }
-    else if (d.bg === 'pg') setBg('pg');                    // only shows if THIS page was opened with the question's own page content
+    else if (d.bg === 'pg') setBg('pg');                    // only shows if this page has the question's content (assignment link, grading link, or student link)
     else setBg(PRESETS[d.bg] ? d.bg : 'blank');
     page = 0; pages = Math.max(pgPages.length, 1, ...items.map(it => (it.g | 0) + 1)); buildPager();
     redraw();
     const n = items.length;
     say((d.q ? 'Question ' + d.q + ': ' : '') + n + ' item' + (n === 1 ? '' : 's') +
       (d.bg === 'doc' && !docRaw ? '. This was drawn on a document background: open your grading link from the Question builder to see it' : '') +
-      (d.bg === 'pg' && !pgPages.length ? '. This was drawn on a question page or excerpt: open your grading link from the Question builder to see it' : '') + '.');
+      (d.bg === 'pg' && (!pgPages.length || !pgFound) ? '. This was drawn on an excerpt or pictures' + (d.q ? ' (question ' + d.q + ')' : '') + ' that this link does not include: open your assignment grading link from the Question builder to see it' : '') + '.');
   } catch (e) { say('That does not look like a complete, valid save code. Check that the whole code was pasted.'); }
 };
 
@@ -1030,7 +1066,7 @@ function initBuild() {
     if ($('bKeys').value !== 'algebra') q.set('keys', $('bKeys').value);
     if ($('bLock').checked && (bgParam || pgm)) q.set('lock', '1');
     const base = $('bBase').value.trim();
-    if ($('bLink').checked) q.set('view', base);
+    if ($('bLink').checked) { q.set('view', base); if ($('bInc').checked && pgm) q.set('incpg', '1'); }
     // Page content and long question text can be large, so they go after the # (the browser keeps it; servers never see it).
     const sep = ($('bHash').checked || pgm || pr.length > 300) ? '#' : '?', fix = s => s.replace(/%2C/g, ',');
     const src = base + sep + fix(q.toString()), h = Math.max(400, Number($('bHeight').value) || 800);
@@ -1089,6 +1125,61 @@ function initBuild() {
     update();
   }
   function refreshSoon() { if (!usesPg()) { pgSeq++; pgCode = ''; return; } pgCode = ''; clearTimeout(pgTimer); pgTimer = setTimeout(refreshPg, 250); }
+  // ----- the assignment: a list of finished questions, and one grading link that covers all of them -----
+  const FIELDS = ['bId', 'bLabel', 'bPrompt', 'bBg', 'bImg', 'bText', 'bTitle', 'bKind', 'bFont', 'bNum', 'bLayout', 'bHeight', 'bLock', 'bLink', 'bInc', 'bKeys', 'bQual', 'bHash'];
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem('wb-assignment') || '[]'); if (!Array.isArray(list)) list = []; } catch (e) { list = []; }
+  const saveList = () => { try { localStorage.setItem('wb-assignment', JSON.stringify(list)); } catch (e) {} };
+  const KIND = { blank: 'Blank', grid: 'Graph paper', axes: 'Coordinate plane', lined: 'Lined paper', image: 'Picture file', text: 'Excerpt text', files: 'Pictures' };
+  async function copyText(str, msg) {
+    try { await navigator.clipboard.writeText(str); msg('Copied.'); return; } catch (e) {}
+    const t = document.createElement('textarea'); t.value = str; document.body.appendChild(t); t.select();
+    try { msg(document.execCommand('copy') ? 'Copied.' : 'Select the text and copy it.'); } catch (e) { msg('Select the text and copy it.'); }
+    t.remove();
+  }
+  async function renderList() {
+    $('bAsg').hidden = !list.length;
+    const box = $('bList'); box.textContent = '';
+    list.forEach((r, i) => {
+      const row = document.createElement('div'); row.className = 'qrow';
+      const t = document.createElement('span'); t.textContent = r.id + ' · ' + (KIND[r.kind] || r.kind) + (r.pg ? ' · ' + (r.pg.length / 1024).toFixed(0) + ' KB of page content' : '');
+      const mk = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = fn; return b; };
+      row.append(t, mk('Copy embed code', () => copyText(r.embed, m => $('bSetMsg').textContent = r.id + ': ' + m)),
+        mk('Edit', () => editRow(i)), mk('Remove', () => { list.splice(i, 1); saveList(); renderList(); }));
+      box.appendChild(row);
+    });
+    const base = $('bBase').value.trim(), withPg = list.filter(r => r.pg), map = Object.create(null);
+    withPg.forEach(r => { map[r.id] = r.pg; });
+    let link = base + '#mode=view';
+    if (withPg.length) link += '&set=' + await writeSet(map);
+    $('bSet').value = list.length ? link : '';
+    $('bSetMsg').textContent = !list.length ? '' : withPg.length ?
+      'This link includes the excerpts and pictures of ' + withPg.length + ' question' + (withPg.length === 1 ? '' : 's') + ' (' + (link.length / 1024).toFixed(0) + ' KB). Keep it safe: it is how you see student work on those pages. It does not contain any student work.' :
+      'None of these questions needs extra page content, so this link works for every question in the assignment.';
+  }
+  function editRow(i) {
+    const r = list[i]; if (!r) return;
+    for (const id of FIELDS) { const el = $(id), v = r.f[id]; if (v === undefined) continue; if (el.type === 'checkbox') el.checked = v; else el.value = v; }
+    document.querySelectorAll('.bTool').forEach(x => { x.checked = r.f.tools.includes(x.value); });
+    pgCode = ''; refreshSoon(); update();
+    $('bMsg').textContent = r.kind === 'files' ? 'Choose the pictures again, then press "Add this question to the assignment" to update ' + r.id + '.' : 'Make your changes, then press "Add this question to the assignment" to update ' + r.id + '.';
+    try { $('bId').scrollIntoView({ block: 'center' }); } catch (e) {}
+  }
+  $('bAdd').onclick = async () => {
+    const id = $('bId').value.trim(), kind = $('bBg').value;
+    if (!id) { $('bMsg').textContent = 'Give the question an ID first (Q1, Q2, ...).'; return; }
+    if (usesPg() && (!pgCode || pgBusy)) { $('bMsg').textContent = 'The excerpt or pictures are not ready yet. ' + (pgMsg || 'Wait a moment.'); return; }
+    if (!$('bOut').value) { $('bMsg').textContent = 'There is no embed code yet.'; return; }
+    const f = {}; for (const fid of FIELDS) { const el = $(fid); f[fid] = el.type === 'checkbox' ? el.checked : el.value; }
+    f.tools = [...document.querySelectorAll('.bTool')].filter(x => x.checked).map(x => x.value);
+    const row = { id, kind, embed: $('bOut').value, pg: usesPg() ? pgCode : '', f };
+    const at = list.findIndex(r => r.id === id);
+    if (at >= 0) list[at] = row; else list.push(row);
+    saveList(); await renderList();
+    $('bMsg').textContent = (at >= 0 ? id + ' was updated in the assignment.' : id + ' was added to the assignment.') + ' Next: change the Question ID for the next question.';
+  };
+  $('bCopySet').onclick = () => copyText($('bSet').value, m => $('bSetMsg').textContent = m);
+  $('bClearList').onclick = () => { list = []; saveList(); renderList(); };
   const PGIN = '#bText,#bTitle,#bKind,#bFont,#bNum,#bFiles,#bQual,#bBg,#bLayout';
   document.querySelectorAll('#buildRow input, #buildRow select, #bText, #bPrompt').forEach(el => {
     const on = () => { if (el.matches(PGIN)) refreshSoon(); update(); };
@@ -1104,6 +1195,7 @@ function initBuild() {
   $('bCopy').onclick = () => copyFrom($('bOut'), m => $('bMsg').textContent = m);
   $('bCopyView').onclick = () => copyFrom($('bView'), m => $('bMsg').textContent = m);
   update();
+  renderList();
 }
 
 // ---------- Startup ----------
@@ -1118,7 +1210,10 @@ function initBuild() {
   const pr = params.get('prompt');
   if (pr && !BUILD) { $('qPrompt').textContent = pr.slice(0, 1500); $('qPrompt').hidden = false; }
   // The teacher's page content (an excerpt or pictures). The viewer waits for it before opening a student's drawing.
-  const pgReady = pgRaw && !BUILD ? readPg(pgRaw).then(applyPg).catch(() => say('The pages for this question could not be loaded. Tell your teacher.')) : Promise.resolve();
+  const setRaw = params.get('set');
+  const pgReady = Promise.all([
+    pgRaw && !BUILD ? readPg(pgRaw).then(applyPg).catch(() => say('The pages for this question could not be loaded. Tell your teacher.')) : null,
+    setRaw && VIEW ? readSet(setRaw).then(m => { setMap = m; }).catch(() => say('That assignment grading link could not be read. Open it again from the Question builder.')) : null]);
   if (LINK && !VIEW && !BUILD) {
     $('save').textContent = 'Create save link'; $('copy').textContent = 'Copy link';
     $('stuHint').innerHTML = 'Draw with Apple Pencil or a mouse (turn on "Draw with finger" to use a finger). ' +
